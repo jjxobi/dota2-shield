@@ -1,0 +1,5 @@
+requests
+pandas
+duckdb
+python-dotenv
+scikit-learn
