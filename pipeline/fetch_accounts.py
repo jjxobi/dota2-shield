@@ -1,64 +1,48 @@
 """
 fetch_accounts.py
-Pulls core profile data for a given Dota 2 account_id from the OpenDota API.
-Free tier, no API key required at low request volume.
+Fetches core profile + win/loss data for an account and writes directly
+into the accounts table. No intermediate JSON files — DuckDB is the
+single source of truth.
 """
 
-import requests
-import time
-import json
-from pathlib import Path
-
-OPENDOTA_BASE = "https://api.opendota.com/api"
-RAW_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "raw_profiles"
+import store
+import api_client
 
 
-def fetch_profile(account_id: int) -> dict:
-    """Fetch basic profile + rank data for one account."""
-    url = f"{OPENDOTA_BASE}/players/{account_id}"
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    return response.json()
+def fetch_and_store_profile(con, account_id: int):
+    status = store.get_ingestion_status(con, account_id, "profile")
+    if status == "success":
+        print(f"  Profile already loaded for {account_id}, skipping (delete ingestion_state row to force refetch)")
+        return
 
+    try:
+        profile = api_client.get(f"/players/{account_id}")
+        wl = api_client.get(f"/players/{account_id}/wl")
 
-def fetch_win_loss(account_id: int) -> dict:
-    """Fetch aggregate win/loss totals for one account."""
-    url = f"{OPENDOTA_BASE}/players/{account_id}/wl"
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    return response.json()
+        store.upsert_account(
+            con, account_id,
+            profile.get("profile", {}).get("personaname"),
+            profile.get("rank_tier"),
+            wl.get("win"),
+            wl.get("lose"),
+        )
+        store.record_ingestion_state(con, account_id, "profile", "success", n_items=1)
+        print(f"  Profile loaded for account_id={account_id}")
 
-
-def save_raw(account_id: int, data: dict, suffix: str):
-    RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = RAW_DATA_DIR / f"{account_id}_{suffix}.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    print(f"Saved: {out_path}")
-
-
-def fetch_account_bundle(account_id: int):
-    """Fetch and save profile + win/loss for one account, respecting rate limits."""
-    print(f"Fetching profile for account_id={account_id}...")
-    profile = fetch_profile(account_id)
-    save_raw(account_id, profile, "profile")
-
-    time.sleep(1)  # be polite to the free API — no key means shared rate limit
-
-    print(f"Fetching win/loss for account_id={account_id}...")
-    wl = fetch_win_loss(account_id)
-    save_raw(account_id, wl, "wl")
-
-    return profile, wl
+    except Exception as e:
+        store.record_ingestion_state(con, account_id, "profile", "failed", error_message=str(e))
+        print(f"  FAILED profile fetch for {account_id}: {e}")
+        raise
 
 
 if __name__ == "__main__":
-    # --- TEST RUN: replace with a real account_id ---
-    TEST_ACCOUNT_ID = 314554951  # test ID
+    TEST_ACCOUNT_ID = 314554951
 
-    profile, wl = fetch_account_bundle(TEST_ACCOUNT_ID)
+    con = store.get_connection()
+    store.init_schema(con)
 
-    print("\n--- Quick sanity check ---")
-    print("Name:", profile.get("profile", {}).get("personaname"))
-    print("Rank tier:", profile.get("rank_tier"))
-    print("Win/Loss:", wl)
+    fetch_and_store_profile(con, TEST_ACCOUNT_ID)
+
+    print("\n--- Sanity check ---")
+    print(con.execute("SELECT * FROM accounts WHERE account_id = ?", [TEST_ACCOUNT_ID]).fetchdf())
+    con.close()
