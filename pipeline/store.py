@@ -5,13 +5,21 @@ connection management, and read/write helpers.
 
 Design principles:
   - Raw facts (accounts, match_history, raw_match_cache) are the durable
-    log. Derived tables (parsed_early_matches) are rebuildable from raw
-    facts at any time via rebuild_parsed_early_matches().
+    log. Derived tables (parsed_early_matches, match_role_scores) are
+    rebuildable from raw facts at any time.
   - raw_match_cache is keyed by match_id globally, not per-account — a
     match played by two labelled accounts is only ever fetched/stored once.
   - ingestion_state is the resumability ledger: before fetching anything,
     callers check this table so re-running a script after a partial
     failure doesn't redo completed work or burn API budget.
+
+NOTE ON SCHEMA CHANGES: tables are created with CREATE TABLE IF NOT EXISTS,
+which means changing a table definition here does NOT alter an existing
+database file — the old schema silently persists. When adding/changing
+columns on a table that already exists in your local dota_shield.duckdb,
+drop it first: con.execute("DROP TABLE IF EXISTS <table_name>") before
+calling init_schema(), or delete the .duckdb file entirely for a clean
+rebuild. This has bitten us twice already (parsed_early_matches, heroes).
 """
 
 import duckdb
@@ -92,9 +100,11 @@ def init_schema(con):
     # Derived table — rebuildable at any time from raw_match_cache +
     # account_early_match_selection via rebuild_parsed_early_matches().
     # item slots: motor-habit fingerprinting (see METHODOLOGY.md feature log)
-    # lane_role / is_roaming: per-MATCH role context, needed because last-hit
-    # counts are only meaningful when compared within the same role — a
-    # support intentionally has low last hits by design, regardless of skill.
+    # lane_role / is_roaming: per-MATCH role context from OpenDota's replay
+    # parser. Only populated when a match was deep-parsed, which requires
+    # the replay to still exist on Valve's servers (~10 day retention) —
+    # in practice this is null for most historical matches. See
+    # role_classification.py for the fallback used when these are null.
     con.execute("""
         CREATE TABLE IF NOT EXISTS parsed_early_matches (
             account_id BIGINT,
@@ -118,6 +128,28 @@ def init_schema(con):
             backpack_1 INTEGER,
             backpack_2 INTEGER,
             start_time BIGINT,
+            PRIMARY KEY (account_id, match_id)
+        )
+    """)
+
+    # Derived, rebuildable via role_classification.classify_and_store_account_matches().
+    # Raw component signals are persisted (not just role_score) so
+    # economy_signal can be used standalone — e.g. a smurf playing a
+    # support hero can still show a high economy_signal even while
+    # correctly being labeled role='support'. See
+    # skill_trajectory.compute_economic_dominance_score().
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS match_role_scores (
+            account_id BIGINT,
+            match_id BIGINT,
+            sequence_order INTEGER,
+            role VARCHAR,
+            role_source VARCHAR,
+            role_score DOUBLE,
+            economy_field_used VARCHAR,
+            economy_signal DOUBLE,
+            last_hits_signal DOUBLE,
+            level_signal DOUBLE,
             PRIMARY KEY (account_id, match_id)
         )
     """)
@@ -319,6 +351,39 @@ def rebuild_parsed_early_matches(con, account_id: int) -> int:
 
 
 # ---------------------------------------------------------------------
+# match_role_scores (derived — via role_classification.py)
+# ---------------------------------------------------------------------
+
+def upsert_match_role_scores(con, rows: list):
+    """
+    `rows` is a list of lists matching the match_role_scores column order:
+    [account_id, match_id, sequence_order, role, role_source, role_score,
+     economy_field_used, economy_signal, last_hits_signal, level_signal]
+
+    Clears this account's existing rows first, since role classification
+    is fully rebuildable and should never accumulate stale rows from a
+    prior run with a different n_earliest or classification logic.
+    """
+    if not rows:
+        return
+
+    account_id = rows[0][0]
+    con.execute("DELETE FROM match_role_scores WHERE account_id = ?", [account_id])
+    con.executemany("""
+        INSERT INTO match_role_scores
+        (account_id, match_id, sequence_order, role, role_source, role_score,
+         economy_field_used, economy_signal, last_hits_signal, level_signal)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, rows)
+
+
+def get_match_role_scores(con, account_id: int):
+    return con.execute("""
+        SELECT * FROM match_role_scores WHERE account_id = ? ORDER BY sequence_order
+    """, [account_id]).fetchdf()
+
+
+# ---------------------------------------------------------------------
 # heroes reference
 # ---------------------------------------------------------------------
 
@@ -340,7 +405,7 @@ if __name__ == "__main__":
     print("--- Table row counts ---")
     for table in ["accounts", "match_history", "raw_match_cache",
                   "account_early_match_selection", "parsed_early_matches",
-                  "ingestion_state", "heroes"]:
+                  "match_role_scores", "ingestion_state", "heroes"]:
         count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         print(f"  {table}: {count}")
 
