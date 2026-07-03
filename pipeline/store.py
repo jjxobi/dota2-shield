@@ -1,3 +1,19 @@
+"""
+store.py
+Single source of truth for all DOTA-SHIELD data: schema definition,
+connection management, and read/write helpers.
+
+Design principles:
+  - Raw facts (accounts, match_history, raw_match_cache) are the durable
+    log. Derived tables (parsed_early_matches) are rebuildable from raw
+    facts at any time via rebuild_parsed_early_matches().
+  - raw_match_cache is keyed by match_id globally, not per-account — a
+    match played by two labelled accounts is only ever fetched/stored once.
+  - ingestion_state is the resumability ledger: before fetching anything,
+    callers check this table so re-running a script after a partial
+    failure doesn't redo completed work or burn API budget.
+"""
+
 import duckdb
 import json
 from pathlib import Path
@@ -75,7 +91,10 @@ def init_schema(con):
 
     # Derived table — rebuildable at any time from raw_match_cache +
     # account_early_match_selection via rebuild_parsed_early_matches().
-    # added item slots for possible motor habit change tracking.
+    # item slots: motor-habit fingerprinting (see METHODOLOGY.md feature log)
+    # lane_role / is_roaming: per-MATCH role context, needed because last-hit
+    # counts are only meaningful when compared within the same role — a
+    # support intentionally has low last hits by design, regardless of skill.
     con.execute("""
         CREATE TABLE IF NOT EXISTS parsed_early_matches (
             account_id BIGINT,
@@ -86,6 +105,9 @@ def init_schema(con):
             xp_per_min INTEGER,
             last_hits INTEGER,
             denies INTEGER,
+            duration INTEGER,
+            lane_role INTEGER,
+            is_roaming BOOLEAN,
             item_0 INTEGER,
             item_1 INTEGER,
             item_2 INTEGER,
@@ -120,7 +142,8 @@ def init_schema(con):
             name VARCHAR,
             localized_name VARCHAR,
             primary_attr VARCHAR,
-            attack_type VARCHAR
+            attack_type VARCHAR,
+            roles VARCHAR  -- JSON-encoded array, e.g. '["Carry","Nuker"]'
         )
     """)
 
@@ -240,7 +263,10 @@ def rebuild_parsed_early_matches(con, account_id: int) -> int:
     deterministically reconstructs parsed_early_matches for this account.
 
     Safe to call repeatedly — this table is never the source of truth,
-    it's always recomputable from the two tables above.
+    it's always recomputable from the two tables above. This means adding
+    a new field we forgot to capture (e.g. lane_role) never requires
+    refetching from the API — the raw payload is already cached, we just
+    re-run this function to pull the new field out of it.
     """
     con.execute("DELETE FROM parsed_early_matches WHERE account_id = ?", [account_id])
 
@@ -267,6 +293,8 @@ def rebuild_parsed_early_matches(con, account_id: int) -> int:
             account_id, match_id, seq, player.get("hero_id"),
             player.get("gold_per_min"), player.get("xp_per_min"),
             player.get("last_hits"), player.get("denies"),
+            player.get("duration"), player.get("lane_role"),
+            player.get("is_roaming"),
             player.get("item_0"), player.get("item_1"), player.get("item_2"),
             player.get("item_3"), player.get("item_4"), player.get("item_5"),
             player.get("backpack_0"), player.get("backpack_1"), player.get("backpack_2"),
@@ -277,9 +305,10 @@ def rebuild_parsed_early_matches(con, account_id: int) -> int:
         con.executemany("""
             INSERT INTO parsed_early_matches
             (account_id, match_id, sequence_order, hero_id, gold_per_min,
-             xp_per_min, last_hits, denies, item_0, item_1, item_2, item_3,
-             item_4, item_5, backpack_0, backpack_1, backpack_2, start_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             xp_per_min, last_hits, denies, duration, lane_role, is_roaming,
+             item_0, item_1, item_2, item_3, item_4, item_5,
+             backpack_0, backpack_1, backpack_2, start_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, rows)
 
     if missing:
@@ -295,18 +324,16 @@ def rebuild_parsed_early_matches(con, account_id: int) -> int:
 
 def upsert_heroes(con, heroes: list):
     rows = [[h["id"], h.get("name"), h.get("localized_name"),
-             h.get("primary_attr"), h.get("attack_type")] for h in heroes]
+             h.get("primary_attr"), h.get("attack_type"),
+             json.dumps(h.get("roles", []))] for h in heroes]
     con.executemany("""
-        INSERT OR REPLACE INTO heroes (hero_id, name, localized_name, primary_attr, attack_type)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO heroes (hero_id, name, localized_name, primary_attr, attack_type, roles)
+        VALUES (?, ?, ?, ?, ?, ?)
     """, rows)
     return len(rows)
 
 
 if __name__ == "__main__":
-    # Just initializes schema and reports current state — the actual
-    # fetching happens in fetch_accounts.py / fetch_match_history.py /
-    # fetch_early_matches.py, which all import and use this module.
     con = get_connection()
     init_schema(con)
 
