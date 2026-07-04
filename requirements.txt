@@ -3,3 +3,6 @@ pandas
 duckdb
 python-dotenv
 scikit-learn
+fastapi
+uvicorn
+ruptures
