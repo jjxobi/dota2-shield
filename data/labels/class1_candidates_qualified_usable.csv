@@ -1,0 +1,8 @@
+account_id,usable,core_n_games,core_lhm_slope,core_gpm_slope,core_lhm_game1,support_n_games,economic_dominance_avg,discontinuity_n_matches,discontinuity_win_rate_changepoints
+202904162,True,46,-0.0448,-1.6764,8.02,4,0.61,596,[]
+422920259,True,39,0.0594,-0.6257,12.99,2,0.671,238,[]
+885981676,True,10,0.3659,20.3515,10.43,0,0.8,483,[]
+155305029,True,39,0.1682,7.5771,6.65,11,0.266,622,[]
+252396843,True,6,-0.0419,32.6857,4.37,0,0.583,433,[]
+207742403,True,0,,,,2,,369,[]
+427952348,True,48,0.0328,0.8635,4.43,2,0.45,426,[]

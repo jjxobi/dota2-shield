@@ -29,6 +29,7 @@ BACKOFF_BASE_SECONDS = 2  # 2, 4, 8, 16, 32 seconds on successive retries
 
 _last_call_time = 0.0
 _call_count = 0
+_daily_remaining = None
 
 
 def _respect_rate_limit():
@@ -38,6 +39,9 @@ def _respect_rate_limit():
         time.sleep(MIN_SECONDS_BETWEEN_CALLS - elapsed)
     _last_call_time = time.time()
 
+def get_daily_remaining():
+    """Returns the last known daily quota remaining, or None if unknown yet."""
+    return _daily_remaining
 
 def get(path: str, params: dict = None) -> dict:
     """
@@ -68,6 +72,8 @@ def get(path: str, params: dict = None) -> dict:
                 continue
 
             response.raise_for_status()
+            global _daily_remaining
+            _daily_remaining = response.headers.get("X-Rate-Limit-Remaining-Day")
             return response.json()
 
         except requests.exceptions.Timeout:

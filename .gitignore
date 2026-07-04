@@ -4,3 +4,5 @@ __pycache__/
 .env
 data/processed/
 .ipynb_checkpoints/
+
+reset.py

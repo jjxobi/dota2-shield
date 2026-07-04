@@ -26,9 +26,39 @@ import duckdb
 import json
 from pathlib import Path
 from datetime import datetime, timezone
+import uuid
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "processed"
 DB_PATH = DATA_DIR / "dota_shield.duckdb"
+
+def create_lookup_job(con, account_id: int, tier1_result: dict) -> str:
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    con.execute("""
+        INSERT INTO lookup_jobs (job_id, account_id, status, tier1_result, tier2_result, created_at, updated_at)
+        VALUES (?, ?, 'tier1_complete', ?, NULL, ?, ?)
+    """, [job_id, account_id, json.dumps(tier1_result), now, now])
+    return job_id
+
+
+def update_job_status(con, job_id: str, status: str, tier2_result: dict = None):
+    con.execute("""
+        UPDATE lookup_jobs
+        SET status = ?, tier2_result = ?, updated_at = ?
+        WHERE job_id = ?
+    """, [status, json.dumps(tier2_result) if tier2_result else None,
+          datetime.now(timezone.utc), job_id])
+
+
+def get_job(con, job_id: str):
+    row = con.execute("SELECT * FROM lookup_jobs WHERE job_id = ?", [job_id]).fetchone()
+    if row is None:
+        return None
+    cols = [d[0] for d in con.description]
+    result = dict(zip(cols, row))
+    result["tier1_result"] = json.loads(result["tier1_result"]) if result["tier1_result"] else None
+    result["tier2_result"] = json.loads(result["tier2_result"]) if result["tier2_result"] else None
+    return result
 
 
 def get_connection():
@@ -62,6 +92,7 @@ def init_schema(con):
             party_size INTEGER,
             game_mode INTEGER,
             lobby_type INTEGER,
+            region INTEGER,
             win BOOLEAN,
             PRIMARY KEY (account_id, match_id)
         )
@@ -178,6 +209,18 @@ def init_schema(con):
             roles VARCHAR  -- JSON-encoded array, e.g. '["Carry","Nuker"]'
         )
     """)
+    
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS lookup_jobs (
+            job_id VARCHAR PRIMARY KEY,
+            account_id BIGINT,
+            status VARCHAR,
+            tier1_result VARCHAR,
+            tier2_result VARCHAR,        
+            created_at TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+    """)
 
 
 # ---------------------------------------------------------------------
@@ -220,7 +263,9 @@ def upsert_account(con, account_id: int, personaname: str, rank_tier: int,
 def upsert_match_history(con, account_id: int, matches: list):
     """
     `matches` is the raw list of match summary dicts from OpenDota's
-    /players/{account_id}/matches endpoint.
+    /players/{account_id}/matches endpoint. Returns 0 without error if
+    the account has no matches matching the fetch filter (e.g. an account
+    that never plays ranked solo queue).
     """
     rows = []
     for m in matches:
@@ -230,14 +275,17 @@ def upsert_match_history(con, account_id: int, matches: list):
             account_id, m.get("match_id"), m.get("hero_id"), m.get("kills"),
             m.get("deaths"), m.get("assists"), m.get("duration"),
             m.get("start_time"), m.get("average_rank"), m.get("party_size"),
-            m.get("game_mode"), m.get("lobby_type"), won,
+            m.get("game_mode"), m.get("lobby_type"), m.get("region"), won,
         ])
+
+    if not rows:
+        return 0
 
     con.executemany("""
         INSERT OR REPLACE INTO match_history
         (account_id, match_id, hero_id, kills, deaths, assists, duration,
-         start_time, average_rank, party_size, game_mode, lobby_type, win)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         start_time, average_rank, party_size, game_mode, lobby_type, region, win)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, rows)
     return len(rows)
 

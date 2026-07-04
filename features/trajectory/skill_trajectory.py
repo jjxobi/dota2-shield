@@ -50,10 +50,11 @@ def _get_joined_matches(con, account_id: int) -> pd.DataFrame:
 
 def compute_core_trajectory(con, account_id: int, min_games: int = 5) -> dict:
     """
-    Last-hit and GPM improvement trajectory, computed ONLY on games
-    classified as 'core'. This is the primary Class 0 vs Class 1 signal
-    from the original brief: legitimate new players show a rising slope,
-    fresh smurfs show a near-flat one from game 1.
+    Last-hit-per-minute and GPM improvement trajectory, computed ONLY on
+    games classified as 'core'. Last hits are normalized by game duration
+    (last_hits / (duration / 60)) since raw last-hit count conflates
+    mechanical skill with game length — a 25-minute stomp and a 55-minute
+    grind aren't comparable on raw count alone.
     """
     df = _get_joined_matches(con, account_id)
     core_df = df[df["role"] == "core"].reset_index(drop=True)
@@ -61,21 +62,23 @@ def compute_core_trajectory(con, account_id: int, min_games: int = 5) -> dict:
     if len(core_df) < min_games:
         return {
             "core_n_games": len(core_df),
-            "core_lh_slope": None, "core_gpm_slope": None,
-            "core_lh_game1": None, "core_lh_consistency": None,
+            "core_lhm_slope": None, "core_gpm_slope": None,
+            "core_lhm_game1": None, "core_lhm_consistency": None,
             "insufficient_data": True,
         }
 
-    x = np.arange(len(core_df), dtype=float)  # position within core-only sequence
-    lh = core_df["last_hits"].to_numpy(dtype=float)
+    duration_min = core_df["duration"].to_numpy(dtype=float) / 60.0
+    lh_per_min = core_df["last_hits"].to_numpy(dtype=float) / duration_min
+
+    x = np.arange(len(core_df), dtype=float)
     gpm = core_df["gold_per_min"].to_numpy(dtype=float)
 
     return {
         "core_n_games": len(core_df),
-        "core_lh_slope": _linear_slope(x, lh),
+        "core_lhm_slope": _linear_slope(x, lh_per_min),
         "core_gpm_slope": _linear_slope(x, gpm),
-        "core_lh_game1": float(core_df.iloc[0]["last_hits"]),
-        "core_lh_consistency": round(float(lh.std()), 2),
+        "core_lhm_game1": round(float(lh_per_min[0]), 2),
+        "core_lhm_consistency": round(float(lh_per_min.std()), 2),
         "insufficient_data": False,
     }
 
