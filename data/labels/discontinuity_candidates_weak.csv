@@ -1,0 +1,16 @@
+account_id,classification,n_matches,overall_win_rate,changepoints,shift_details,flagged_at
+314554951,class4_candidate_downward_shift,1317,0.515,[415],"[{'match_index': 415, 'win_rate_before': 0.625, 'win_rate_after': 0.35, 'shift': -0.275}]",2026-07-05T11:41:14.360779+00:00
+141519081,class2_3_candidate_upward_shift,255,0.596,[140],"[{'match_index': 140, 'win_rate_before': 0.45, 'win_rate_after': 0.8, 'shift': 0.35}]",2026-07-05T11:42:39.537764+00:00
+390940758,class2_3_candidate_upward_shift,450,0.64,[190],"[{'match_index': 190, 'win_rate_before': 0.525, 'win_rate_after': 0.775, 'shift': 0.25}]",2026-07-05T11:42:52.061374+00:00
+160248123,class2_3_candidate_upward_shift,937,0.502,"[165, 425]","[{'match_index': 165, 'win_rate_before': 0.425, 'win_rate_after': 0.625, 'shift': 0.2}, {'match_index': 425, 'win_rate_before': 0.75, 'win_rate_after': 0.425, 'shift': -0.325}]",2026-07-05T11:42:56.863295+00:00
+140485342,class2_3_candidate_upward_shift,855,0.545,"[690, 790]","[{'match_index': 690, 'win_rate_before': 0.525, 'win_rate_after': 0.925, 'shift': 0.4}, {'match_index': 790, 'win_rate_before': 0.9, 'win_rate_after': 0.55, 'shift': -0.35}]",2026-07-05T11:44:35.147411+00:00
+918944105,class4_candidate_downward_shift,90,0.533,[50],"[{'match_index': 50, 'win_rate_before': 0.675, 'win_rate_after': 0.325, 'shift': -0.35}]",2026-07-05T11:44:35.155423+00:00
+463381936,class2_3_candidate_upward_shift,1161,0.444,[80],"[{'match_index': 80, 'win_rate_before': 0.225, 'win_rate_after': 0.525, 'shift': 0.3}]",2026-07-05T11:46:14.817894+00:00
+111361153,class5_candidate_persistent_underperformance,373,0.442,[],[],2026-07-05T11:46:22.694283+00:00
+213966554,class2_3_candidate_upward_shift,952,0.582,[670],"[{'match_index': 670, 'win_rate_before': 0.525, 'win_rate_after': 0.7, 'shift': 0.175}]",2026-07-05T11:46:30.352777+00:00
+142554861,class5_candidate_persistent_underperformance,188,0.426,[],[],2026-07-05T11:46:30.368418+00:00
+206048051,class2_3_candidate_upward_shift,566,0.627,"[60, 305]","[{'match_index': 60, 'win_rate_before': 0.575, 'win_rate_after': 0.875, 'shift': 0.3}, {'match_index': 305, 'win_rate_before': 0.775, 'win_rate_after': 0.525, 'shift': -0.25}]",2026-07-05T11:46:30.576305+00:00
+1419728405,class2_3_candidate_upward_shift,552,0.663,[130],"[{'match_index': 130, 'win_rate_before': 0.5, 'win_rate_after': 0.85, 'shift': 0.35}]",2026-07-05T11:48:20.794460+00:00
+1186693478,class5_candidate_persistent_underperformance,158,0.424,[],[],2026-07-05T11:48:41.011225+00:00
+110890934,class5_candidate_persistent_underperformance,152,0.421,[],[],2026-07-05T11:48:41.025974+00:00
+140115282,class5_candidate_persistent_underperformance,108,0.343,[],[],2026-07-05T11:48:51.596736+00:00
